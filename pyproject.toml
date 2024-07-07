@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "clipboard-listener"
+version = "0.1.0"
+description = ""
+authors = ["nogara <nogara@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+pyperclip = "^1.9.0"
+keyboard = "^0.13.5"
+pyobjc = "^10.3.1"
+python-telegram-bot = "^21.3"
+yt-dlp = "^2024.7.2"
+telethon = "^1.36.0"
+python-dotenv = "^1.0.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
