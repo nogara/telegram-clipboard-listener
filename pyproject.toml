@@ -1,21 +1,25 @@
-[tool.poetry]
+[tool.pdm.build]
+includes = []
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+
+[project]
+authors = [
+    {name = "nogara", email = "nogara@gmail.com"},
+]
+requires-python = "<4.0,>=3.12"
+dependencies = [
+    "pyperclip<2.0.0,>=1.9.0",
+    "keyboard<1.0.0,>=0.13.5",
+    "pyobjc<11.0.0,>=10.3.1",
+    "python-telegram-bot<22.0,>=21.3",
+    "yt-dlp>=2024.7.2,<2025.0.0",
+    "telethon<2.0.0,>=1.36.0",
+    "python-dotenv<2.0.0,>=1.0.1",
+]
 name = "clipboard-listener"
 version = "0.1.0"
 description = ""
-authors = ["nogara <nogara@gmail.com>"]
 readme = "README.md"
-
-[tool.poetry.dependencies]
-python = "^3.12"
-pyperclip = "^1.9.0"
-keyboard = "^0.13.5"
-pyobjc = "^10.3.1"
-python-telegram-bot = "^21.3"
-yt-dlp = "^2024.7.2"
-telethon = "^1.36.0"
-python-dotenv = "^1.0.1"
-
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
