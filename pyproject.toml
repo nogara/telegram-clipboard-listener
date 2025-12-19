@@ -18,6 +18,7 @@ dependencies = [
     "yt-dlp>=2025.0.0",
     "telethon<2.0.0,>=1.36.0",
     "python-dotenv<2.0.0,>=1.0.1",
+    "curl-cffi>=0.13.0",
 ]
 name = "clipboard-listener"
 version = "0.1.0"
