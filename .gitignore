@@ -167,3 +167,4 @@ matched_strings.txt
 urls.db
 *.session
 /urls.txt
+/cookies
