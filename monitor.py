@@ -18,6 +18,8 @@ from database import UrlDatabaseManager
 
 DOWNLOAD_DIR = "downloads"
 DOWNLOAD_TIMEOUT = 300
+POLL_INTERVAL = 0.3
+MAX_PARALLEL_DOWNLOADS = int(os.environ.get("MAX_PARALLEL_DOWNLOADS", "3"))
 
 
 async def create_session(session_name, api_id, api_hash):
@@ -98,6 +100,63 @@ async def send_video(client, files, url):
     return "Ok"
 
 
+async def process_url(client, db, url):
+    """Downloads url and sends it to Telegram, marking it as sent on success."""
+    print("Downloading:", url)
+    files = await download_video(url)
+    if not files:
+        print("Nothing downloaded for:", url)
+        return
+
+    try:
+        await send_video(client, files, url)
+    except Exception as e:
+        # keep the files so they are not lost
+        print("Failed to send to Telegram:", e, files)
+        return
+
+    # only mark as sent and delete once Telegram has the video
+    db.add_record(url)
+    remove_files(files)
+    print("Sent and removed:", files)
+
+
+async def worker(name, queue, client, db, in_flight):
+    while True:
+        url = await queue.get()
+        try:
+            await process_url(client, db, url)
+        except Exception as e:
+            print(f"[{name}] Failed to process {url}:", e)
+        finally:
+            in_flight.discard(url)
+            queue.task_done()
+
+
+async def watch_clipboard(queue, db, pattern, in_flight):
+    # Store the last copied text to compare with new text
+    last_copied_text = ""
+
+    while True:
+        # pbpaste/xclip run as a subprocess, keep it off the event loop
+        clipboard_text = await asyncio.to_thread(pyperclip.paste)
+
+        # If the text has changed and matches the pattern
+        if clipboard_text != last_copied_text and pattern.search(clipboard_text):
+            last_copied_text = clipboard_text
+
+            if clipboard_text in in_flight:
+                print("Already queued:", clipboard_text)
+            elif db.check_record_exists(clipboard_text):
+                print("Already sent text:", clipboard_text)
+            else:
+                print("New text:", clipboard_text)
+                in_flight.add(clipboard_text)
+                queue.put_nowait(clipboard_text)
+
+        await asyncio.sleep(POLL_INTERVAL)
+
+
 async def amain(loop):
     api_id = os.environ.get("TELEGRAM_USERBOT_API_ID")
     api_hash = os.environ.get("TELEGRAM_USERBOT_API_HASH")
@@ -107,50 +166,25 @@ async def amain(loop):
     # fill Telethon's entity cache so numeric chat ids can be resolved
     await client.get_dialogs()
 
-    # Define your pattern here
     # get pattern from the environment variable
-
     pattern = re.compile(os.environ.get("PATTERN_TO_CHECK"))
 
     with UrlDatabaseManager("urls.db") as db:
         db.initialize_database()
 
-        # Store the last copied text to compare with new text
-        last_copied_text = ""
-
-        while True:
-            # Get the current text from the clipboard
-            clipboard_text = pyperclip.paste()
-
-            # If the text has changed and matches the pattern
-            if clipboard_text != last_copied_text and pattern.search(clipboard_text):
-                last_copied_text = clipboard_text
-
-                # check if the text is already sent
-                if db.check_record_exists(clipboard_text):
-                    print("Already sent text:", clipboard_text)
-                    continue
-
-                print("New text:", clipboard_text)
-                files = await download_video(clipboard_text)
-                if not files:
-                    print("Nothing downloaded for:", clipboard_text)
-                    continue
-
-                try:
-                    await send_video(client, files, clipboard_text)
-                except Exception as e:
-                    # keep the files so they are not lost
-                    print("Failed to send to Telegram:", e, files)
-                    continue
-
-                # only mark as sent and delete once Telegram has the video
-                db.add_record(clipboard_text)
-                remove_files(files)
-                print("Sent and removed:", files)
-
-            # Wait for a second before checking again
-            await asyncio.sleep(1)
+        # the clipboard is watched on its own while workers download and send,
+        # so links copied in quick succession are queued instead of missed
+        queue = asyncio.Queue()
+        in_flight = set()
+        workers = [
+            asyncio.create_task(worker(f"worker-{i}", queue, client, db, in_flight))
+            for i in range(MAX_PARALLEL_DOWNLOADS)
+        ]
+        try:
+            await watch_clipboard(queue, db, pattern, in_flight)
+        finally:
+            for w in workers:
+                w.cancel()
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ Before running the bot, you need to configure it by creating a `.env` file based
 - `TELEGRAM_CHAT_ID`: The chat ID where the bot will operate, or the username of the chat.
 - `SQLITE_DATABASE`: The path to the SQLite database file.
 - `TELEGRAM_USERBOT_API_ID` and `TELEGRAM_USERBOT_API_HASH`: Credentials for using the bot as a userbot.
+- `MAX_PARALLEL_DOWNLOADS` (optional, default `3`): How many links `monitor.py` downloads and sends at the same time. Links copied while all workers are busy wait in a queue.
 
 ## Pattern Matching
 
