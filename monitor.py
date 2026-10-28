@@ -19,7 +19,6 @@ from database import UrlDatabaseManager
 DOWNLOAD_DIR = "downloads"
 DOWNLOAD_TIMEOUT = 300
 POLL_INTERVAL = 0.3
-MAX_PARALLEL_DOWNLOADS = int(os.environ.get("MAX_PARALLEL_DOWNLOADS", "3"))
 
 
 async def create_session(session_name, api_id, api_hash):
@@ -173,19 +172,19 @@ async def amain(loop):
     with UrlDatabaseManager("urls.db") as db:
         db.initialize_database()
 
-        # the clipboard is watched on its own while workers download and send,
-        # so links copied in quick succession are queued instead of missed
+        # the clipboard is watched on its own while a single worker downloads
+        # and sends, so links copied in quick succession are queued instead of
+        # missed; downloads run one at a time because yt-dlp rewrites the
+        # shared cookies file on exit and parallel runs read it half-written
         queue = asyncio.Queue()
         in_flight = set()
-        workers = [
-            asyncio.create_task(worker(f"worker-{i}", queue, client, db, in_flight))
-            for i in range(MAX_PARALLEL_DOWNLOADS)
-        ]
+        download_worker = asyncio.create_task(
+            worker("worker", queue, client, db, in_flight)
+        )
         try:
             await watch_clipboard(queue, db, pattern, in_flight)
         finally:
-            for w in workers:
-                w.cancel()
+            download_worker.cancel()
 
 
 if __name__ == "__main__":
