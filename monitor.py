@@ -139,7 +139,8 @@ async def watch_clipboard(queue, db, pattern, in_flight):
 
     while True:
         # pbpaste/xclip run as a subprocess, keep it off the event loop
-        clipboard_text = await asyncio.to_thread(pyperclip.paste)
+        # paste() returns None when the clipboard holds non-text (e.g. an image)
+        clipboard_text = await asyncio.to_thread(pyperclip.paste) or ""
 
         # If the text has changed and matches the pattern
         if clipboard_text != last_copied_text and pattern.search(clipboard_text):
