@@ -19,6 +19,9 @@ from database import UrlDatabaseManager
 DOWNLOAD_DIR = "downloads"
 DOWNLOAD_TIMEOUT = 300
 POLL_INTERVAL = 0.3
+# a TikTok WAF token exported from the browser makes TikTok answer 403 to yt-dlp
+# while it is valid (about 5 minutes); yt-dlp gets its own by solving the challenge
+BLOCKED_COOKIES = {"_waftokenid"}
 
 
 async def create_session(session_name, api_id, api_hash):
@@ -35,10 +38,22 @@ def cookies_for(url):
     return "./cookies/www.instagram.com_cookies.txt"
 
 
+def strip_cookies(path, names):
+    """Removes the named cookies from a Netscape cookies file, if present."""
+    with open(path) as f:
+        lines = f.readlines()
+    kept = [line for line in lines if not set(line.split("\t")[5:6]) & names]
+    if len(kept) != len(lines):
+        with open(path, "w") as f:
+            f.writelines(kept)
+
+
 async def download_video(url):
     """Downloads the video(s) at url and returns the list of downloaded files."""
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
     prefix = os.path.join(DOWNLOAD_DIR, hashlib.md5(url.encode()).hexdigest())
+    cookies = cookies_for(url)
+    strip_cookies(cookies, BLOCKED_COOKIES)
 
     # run yt-dlp from the same environment, passing args as a list so the
     # clipboard content is never interpreted by a shell
@@ -47,7 +62,7 @@ async def download_video(url):
         "-m",
         "yt_dlp",
         "--cookies",
-        cookies_for(url),
+        cookies,
         "--merge-output-format",
         "mp4",
         "-o",
