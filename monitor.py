@@ -19,6 +19,7 @@ from database import UrlDatabaseManager
 DOWNLOAD_DIR = "downloads"
 DOWNLOAD_TIMEOUT = 300
 POLL_INTERVAL = 0.3
+ALBUM_SIZE = 10
 # a TikTok WAF token exported from the browser makes TikTok answer 403 to yt-dlp
 # while it is valid (about 5 minutes); yt-dlp gets its own by solving the challenge
 BLOCKED_COOKIES = {"_waftokenid"}
@@ -48,39 +49,71 @@ def strip_cookies(path, names):
             f.writelines(kept)
 
 
-async def download_video(url):
-    """Downloads the video(s) at url and returns the list of downloaded files."""
+async def run_downloader(url, *args):
+    """Runs a downloader module from this environment; True if it succeeded."""
+    # args are passed as a list so the clipboard content is never
+    # interpreted by a shell
+    process = await asyncio.create_subprocess_exec(sys.executable, "-m", *args, url)
+    try:
+        return await asyncio.wait_for(process.wait(), timeout=DOWNLOAD_TIMEOUT) == 0
+    except asyncio.TimeoutError:
+        process.kill()
+        print("Download timed out:", url)
+        return False
+
+
+def downloaded_files(prefix):
+    # ignore partial downloads left behind by the downloaders
+    return sorted(
+        f
+        for f in glob.glob(f"{prefix}_*")
+        if not f.endswith((".part", ".ytdl")) and ".part-" not in f
+    )
+
+
+async def download_media(url):
+    """Downloads the videos and images at url and returns the downloaded files."""
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-    prefix = os.path.join(DOWNLOAD_DIR, hashlib.md5(url.encode()).hexdigest())
+    name = hashlib.md5(url.encode()).hexdigest()
     cookies = cookies_for(url)
     strip_cookies(cookies, BLOCKED_COOKIES)
 
-    # run yt-dlp from the same environment, passing args as a list so the
-    # clipboard content is never interpreted by a shell
-    process = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-m",
+    video_prefix = os.path.join(DOWNLOAD_DIR, f"{name}_v")
+    videos_ok = await run_downloader(
+        url,
         "yt_dlp",
         "--cookies",
         cookies,
         "--merge-output-format",
         "mp4",
         "-o",
-        f"{prefix}_%(autonumber)s.%(ext)s",
-        url,
+        f"{video_prefix}_%(autonumber)s.%(ext)s",
     )
-    try:
-        await asyncio.wait_for(process.wait(), timeout=DOWNLOAD_TIMEOUT)
-    except asyncio.TimeoutError:
-        process.kill()
-        print("Download timed out:", url)
+    videos = downloaded_files(video_prefix)
+    if videos_ok and videos:
+        return videos
 
-    # ignore partial downloads left behind by yt-dlp
-    return sorted(
-        f
-        for f in glob.glob(f"{prefix}_*")
-        if not f.endswith((".part", ".ytdl")) and ".part-" not in f
+    # yt-dlp only gets videos, so image posts and the images of mixed
+    # carousels fail there; gallery-dl gets both, in the post's order
+    print("Trying gallery-dl for:", url)
+    gallery_prefix = os.path.join(DOWNLOAD_DIR, f"{name}_g")
+    await run_downloader(
+        url,
+        "gallery_dl",
+        "--cookies",
+        cookies,
+        "-D",
+        DOWNLOAD_DIR,
+        "-f",
+        # num is the position in the post; !s keeps a missing num from
+        # breaking the format
+        f"{name}_g_{{num!s:>03}}_{{filename}}.{{extension}}",
     )
+    gallery = downloaded_files(gallery_prefix)
+    if gallery:
+        remove_files(videos)
+        return gallery
+    return videos
 
 
 def remove_files(files):
@@ -101,29 +134,31 @@ def chat_id():
         return value
 
 
-async def send_video(client, files, url):
+async def send_media(client, files, url):
     entity = await client.get_entity(chat_id())
 
-    # a list of files is sent as an album, with the caption on the first one
-    await client.send_file(
-        entity,
-        files if len(files) > 1 else files[0],
-        caption=url,
-        supports_streaming=True,
-    )
+    # a list of files is sent as an album, which holds at most 10 items
+    for i in range(0, len(files), ALBUM_SIZE):
+        chunk = files[i : i + ALBUM_SIZE]
+        await client.send_file(
+            entity,
+            chunk if len(chunk) > 1 else chunk[0],
+            caption=url,
+            supports_streaming=True,
+        )
     return "Ok"
 
 
 async def process_url(client, db, url):
     """Downloads url and sends it to Telegram, marking it as sent on success."""
     print("Downloading:", url)
-    files = await download_video(url)
+    files = await download_media(url)
     if not files:
         print("Nothing downloaded for:", url)
         return
 
     try:
-        await send_video(client, files, url)
+        await send_media(client, files, url)
     except Exception as e:
         # keep the files so they are not lost
         print("Failed to send to Telegram:", e, files)
